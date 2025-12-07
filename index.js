@@ -29,11 +29,23 @@ async function run() {
     await client.db("admin").command({ ping: 1 })
     console.log("Connected to MongoDB!")
 
-    // Example route
+    // Get all books
     app.get("/books", async (req, res) => {
       const result = await booksCollection.find().toArray()
       res.send(result)
     })
+
+    // 
+    //  Add New Book (POST API)
+    app.post("/books", async (req, res) => {
+      try {
+        const newBook = req.body;
+        const result = await booksCollection.insertOne(newBook);
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ error: "Failed to add book" });
+      }
+    });
 
   } catch (error) {
     console.log(error)
