@@ -43,17 +43,18 @@ async function run() {
     });
 
     // Get single book
-    app.get("/books/:id", async (req, res) => {
+  
+
+    // Delete book + related orders
+    app.delete("/books/:id", async (req, res) => {
       try {
         const id = req.params.id;
-        const result = await booksCollection.findOne({ _id: new ObjectId(id) });
-        res.send(result);
+        await booksCollection.deleteOne({ _id: new ObjectId(id) });
+        await ordersCollection.deleteMany({ bookId: id });
+        res.send({ message: "Book and related orders deleted" });
       } catch (err) {
-        res.status(500).send({ error: "Failed to fetch book" });
+        res.status(500).send({ error: "Failed to delete book" });
       }
-    });
-
-    // Add new book
     });
 
     // ===== USER ROLE ROUTES =====
