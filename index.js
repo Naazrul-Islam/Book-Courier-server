@@ -1,9 +1,9 @@
-const express = require('express');
-const cors = require('cors');
+const express = require("express");
+const cors = require("cors");
 const app = express();
-require('dotenv').config();
+require("dotenv").config();
 
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb'); 
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const port = process.env.PORT || 3000;
 
 app.use(express.json());
@@ -25,6 +25,7 @@ async function run() {
 
     const db = client.db("bookCourier");
     const booksCollection = db.collection("books");
+    const roleCollection = db.collection("userRoles");
 
     console.log("Connected to MongoDB!");
 
@@ -54,6 +55,26 @@ async function run() {
       }
     });
 
+    app.post("/user-role", async (req, res) => {
+      try {
+        const role = req.body;
+        const result = await roleCollection.insertOne(role);
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ error: "Failed to add user role" });
+      }
+    });
+
+    app.get("/user-role/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const result = await roleCollection.findOne({ email: email });
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ error: "Failed to get user role" });
+      }
+    });
+
     // PUT update book
     app.put("/books/:id", async (req, res) => {
       const id = req.params.id;
@@ -65,7 +86,6 @@ async function run() {
       const result = await booksCollection.updateOne(filter, updateDoc);
       res.send(result);
     });
-
   } catch (error) {
     console.log(error);
   }
@@ -73,8 +93,8 @@ async function run() {
 
 run().catch(console.dir);
 
-app.get('/', (req, res) => {
-  res.send('Bookcourier Server!');
+app.get("/", (req, res) => {
+  res.send("Bookcourier Server!");
 });
 
 app.listen(port, () => {
