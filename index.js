@@ -42,8 +42,74 @@ async function run() {
       }
     });
 
+
+    // server.js or books route
+app.get("/books/latest", async (req, res) => {
+  try {
+    const books = await booksCollection
+      .find()
+      .sort({ createdAt: -1 }) // newest first
+      .limit(6)               // get last 6 books
+      .toArray();
+    res.send(books);
+  } catch (err) {
+    res.status(500).send({ message: err.message });
+  }
+});
+
+
     // Get single book
-  
+    app.get("/books/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const result = await booksCollection.findOne({ _id: new ObjectId(id) });
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ error: "Failed to fetch book" });
+      }
+    });
+
+    // Add new book
+    app.post("/books", async (req, res) => {
+      try {
+        const newBook = req.body;
+        newBook.status = "unpublished"; // default
+        const result = await booksCollection.insertOne(newBook);
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ error: "Failed to add book" });
+      }
+    });
+
+    // Update book
+    app.put("/books/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const updatedBook = req.body;
+        const result = await booksCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: updatedBook }
+        );
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ error: "Failed to update book" });
+      }
+    });
+
+    // Publish / Unpublish
+    app.patch("/books/:id/publish", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { publish } = req.body; // "published" / "unpublished"
+        const result = await booksCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { status: publish } }
+        );
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ error: "Failed to update status" });
+      }
+    });
 
     // Delete book + related orders
     app.delete("/books/:id", async (req, res) => {
