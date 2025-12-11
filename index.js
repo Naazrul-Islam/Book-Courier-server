@@ -1,102 +1,141 @@
+// server.js
 const express = require("express");
 const cors = require("cors");
-const app = express();
 require("dotenv").config();
-
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+
+const app = express();
 const port = process.env.PORT || 3000;
 
-app.use(express.json());
 app.use(cors());
+app.use(express.json());
 
+// MongoDB connection
 const uri = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@cluster0.c0vwcej.mongodb.net/?appName=Cluster0`;
-
 const client = new MongoClient(uri, {
-  serverApi: {
-    version: ServerApiVersion.v1,
-    strict: true,
-    deprecationErrors: true,
-  },
+  serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true },
 });
 
 async function run() {
   try {
     await client.connect();
-
     const db = client.db("bookCourier");
+
     const booksCollection = db.collection("books");
+    const ordersCollection = db.collection("orders");
     const roleCollection = db.collection("userRoles");
+    const usersCollection = db.collection("users");
 
     console.log("Connected to MongoDB!");
 
-    // GET all books
+    // ===== BOOK ROUTES =====
+
+    // Get all books (optional status filter)
     app.get("/books", async (req, res) => {
-      const status = req.query.status;
-      const query = status ? { status } : {};
-      const result = await booksCollection.find(query).toArray();
-      res.send(result);
-    });
-
-    // GET single book
-    app.get("/books/:id", async (req, res) => {
-      const id = req.params.id;
-      const result = await booksCollection.findOne({ _id: new ObjectId(id) });
-      res.send(result);
-    });
-
-    // POST add new book
-    app.post("/books", async (req, res) => {
       try {
-        const newBook = req.body;
-        const result = await booksCollection.insertOne(newBook);
+        const status = req.query.status; // "published" / "unpublished"
+        const query = status ? { status } : {};
+        const result = await booksCollection.find(query).toArray();
         res.send(result);
-      } catch (error) {
-        res.status(500).send({ error: "Failed to add book" });
+      } catch (err) {
+        res.status(500).send({ error: "Failed to fetch books" });
       }
     });
 
+    // Get single book
+    app.get("/books/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const result = await booksCollection.findOne({ _id: new ObjectId(id) });
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ error: "Failed to fetch book" });
+      }
+    });
+
+    // Add new book
+    });
+
+    // ===== USER ROLE ROUTES =====
+
+    // Add user role
     app.post("/user-role", async (req, res) => {
       try {
-        const role = req.body;
-        const result = await roleCollection.insertOne(role);
+        const roleData = req.body;
+        const result = await roleCollection.insertOne(roleData);
+
+        // Add to users collection if not exists
+        const existingUser = await usersCollection.findOne({ email: roleData.email });
+        if (!existingUser) {
+          await usersCollection.insertOne({ email: roleData.email, role: roleData.role });
+        }
+
         res.send(result);
-      } catch (error) {
+      } catch (err) {
         res.status(500).send({ error: "Failed to add user role" });
       }
     });
 
+    // Get all user roles
+    app.get("/user-roles", async (req, res) => {
+      try {
+        const result = await roleCollection.find().toArray();
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ error: "Failed to get user roles" });
+      }
+    });
+
+    // Get single user role
     app.get("/user-role/:email", async (req, res) => {
       try {
         const email = req.params.email;
-        const result = await roleCollection.findOne({ email: email });
-        res.send(result);
-      } catch (error) {
+        const result = await roleCollection.findOne({ email });
+        res.send(result || {});
+      } catch (err) {
         res.status(500).send({ error: "Failed to get user role" });
       }
     });
 
-    // PUT update book
-    app.put("/books/:id", async (req, res) => {
-      const id = req.params.id;
-      const updatedBook = req.body;
+    // ===== USERS ROUTES =====
 
-      const filter = { _id: new ObjectId(id) };
-      const updateDoc = { $set: updatedBook };
-
-      const result = await booksCollection.updateOne(filter, updateDoc);
-      res.send(result);
+    // Get all users
+    app.get("/users", async (req, res) => {
+      try {
+        const users = await usersCollection.find().toArray();
+        res.send(users);
+      } catch (err) {
+        res.status(500).send({ error: "Failed to fetch users" });
+      }
     });
-  } catch (error) {
-    console.log(error);
+
+    // Update user role
+    app.put("/users/role/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const { role } = req.body;
+        const result = await usersCollection.updateOne(
+          { email },
+          { $set: { role } },
+          { upsert: true }
+        );
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ error: "Failed to update role" });
+      }
+    });
+
+    console.log("Routes are ready!");
+  } catch (err) {
+    console.error(err);
   }
 }
 
 run().catch(console.dir);
 
+// Root endpoint
 app.get("/", (req, res) => {
-  res.send("Bookcourier Server!");
+  res.send("BookCourier Server Running!");
 });
 
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-});
+app.listen(port, () => console.log(`Server running on port ${port}`));
