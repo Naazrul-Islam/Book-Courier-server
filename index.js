@@ -169,6 +169,16 @@ app.get("/orders/user/:email", async (req, res) => {
   }
 });
 
+// Delete order
+app.delete("/orders/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const result = await ordersCollection.deleteOne({ _id: new ObjectId(id) });
+    res.send(result);
+  } catch (err) {
+    res.status(500).send({ error: "Failed to delete order" });
+  }
+});
 
     // ===== USER ROLE ROUTES =====
 
