@@ -82,19 +82,7 @@ app.get("/books/latest", async (req, res) => {
     });
 
     // Update book
-    app.put("/books/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-        const updatedBook = req.body;
-        const result = await booksCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: updatedBook }
-        );
-        res.send(result);
-      } catch (err) {
-        res.status(500).send({ error: "Failed to update book" });
-      }
-    });
+    
 
     // Publish / Unpublish
     app.patch("/books/:id/publish", async (req, res) => {
