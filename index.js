@@ -142,6 +142,19 @@ app.get("/orders", async (req, res) => {
 });
 
 
+// Get orders by user email (user dashboard)
+app.get("/orders/user/:email", async (req, res) => {
+  try {
+    const email = req.params.email;
+    const orders = await ordersCollection.find({ buyerEmail: email }).toArray();
+    res.send(orders);
+  } catch (err) {
+    res.status(500).send({ error: "Failed to fetch user orders" });
+  }
+});
+    // Update order status
+
+
     // ===== USER ROLE ROUTES =====
 
     // Add user role
