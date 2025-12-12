@@ -111,6 +111,37 @@ app.get("/books/latest", async (req, res) => {
       }
     });
 
+
+    // ===== ORDER ROUTES =====
+
+// Create a new order
+app.post("/orders", async (req, res) => {
+  try {
+    const order = req.body;
+
+    // Set default order states
+    order.status = "pending";
+    order.paymentStatus = "unpaid";
+    order.orderDate = new Date();
+
+    const result = await ordersCollection.insertOne(order);
+    res.send(result);
+  } catch (err) {
+    res.status(500).send({ error: "Failed to place order" });
+  }
+});
+
+// Get all orders (admin/librarian panel)
+app.get("/orders", async (req, res) => {
+  try {
+    const orders = await ordersCollection.find().toArray();
+    res.send(orders);
+  } catch (err) {
+    res.status(500).send({ error: "Failed to fetch orders" });
+  }
+});
+
+
     // ===== USER ROLE ROUTES =====
 
     // Add user role
