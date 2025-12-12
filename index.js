@@ -153,6 +153,21 @@ app.get("/orders/user/:email", async (req, res) => {
   }
 });
     // Update order status
+    app.patch("/orders/status/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { status } = req.body; // "pending", "approved", "canceled"
+
+    const result = await ordersCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { status } }
+    );
+
+    res.send(result);
+  } catch (err) {
+    res.status(500).send({ error: "Failed to update order status" });
+  }
+});
 
 
     // ===== USER ROLE ROUTES =====
