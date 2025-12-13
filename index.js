@@ -3,6 +3,7 @@ const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const stripe = require("stripe")(process.env.Stripe_Key);
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -28,13 +29,81 @@ async function run() {
 
     console.log("Connected to MongoDB!");
 
+    // ===== STRIPE PAYMENT INTEGRATION =====
+
+app.post("/create-payment-intent", async (req, res) => {
+  try {
+    const { price } = req.body;
+
+    if (!price) {
+      return res.status(400).send({ error: "Price is required" });
+    }
+
+    const amount = Math.round(price * 100); // USD cents
+
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount,
+      currency: "usd",
+      payment_method_types: ["card"],
+    });
+
+    res.send({
+      clientSecret: paymentIntent.client_secret,
+    });
+  } catch (error) {
+    console.error("Stripe Error:", error);
+    res.status(500).send({ error: error.message });
+  }
+});
+
+// Update order payment status
+
+app.patch("/orders/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { paymentStatus, transactionId } = req.body;
+
+    const result = await ordersCollection.updateOne(
+      { _id: new ObjectId(id) },
+      {
+        $set: {
+          paymentStatus: paymentStatus || "paid",
+          transactionId: transactionId || null,
+          paidAt: new Date(),
+        },
+      }
+    );
+
+    res.send(result);
+  } catch (err) {
+    res.status(500).send({ error: "Failed to update payment" });
+  }
+});
+
+
+// Get single order by id (FOR PAYMENT PAGE)
+app.get("/orders/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const order = await ordersCollection.findOne({ _id: new ObjectId(id) });
+    res.send(order);
+  } catch (err) {
+    res.status(500).send({ error: "Failed to fetch order" });
+  }
+});
+
+
+
+
     // ===== BOOK ROUTES =====
 
     // Get all books (optional status filter)
     app.get("/books", async (req, res) => {
       try {
-        const status = req.query.status; // "published" / "unpublished"
+        const status = req.query.status;
+         // "published" / "unpublished"
         const query = status ? { status } : {};
+        
         const result = await booksCollection.find(query).toArray();
         res.send(result);
       } catch (err) {
@@ -73,7 +142,8 @@ app.get("/books/latest", async (req, res) => {
     app.post("/books", async (req, res) => {
       try {
         const newBook = req.body;
-        newBook.status = "unpublished"; // default
+        newBook.status = "unpublished";
+        newBook.createdAt = new Date();
         const result = await booksCollection.insertOne(newBook);
         res.send(result);
       } catch (err) {
@@ -179,6 +249,21 @@ app.delete("/orders/:id", async (req, res) => {
     res.status(500).send({ error: "Failed to delete order" });
   }
 });
+
+// Get user's payment history
+app.get("/payments/:email", async (req, res) => {
+  try {
+    const email = req.params.email;
+    const payments = await ordersCollection
+      .find({ buyerEmail: email, paymentStatus: "paid" })
+      .toArray();
+
+    res.send(payments);
+  } catch (err) {
+    res.status(500).send({ error: "Failed to fetch payments" });
+  }
+});
+
 
     // ===== USER ROLE ROUTES =====
 
