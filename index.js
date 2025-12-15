@@ -13,7 +13,11 @@ app.use(express.json());
 // MongoDB connection
 const uri = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@cluster0.c0vwcej.mongodb.net/?appName=Cluster0`;
 const client = new MongoClient(uri, {
-  serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true },
+  serverApi: {
+    version: ServerApiVersion.v1,
+    strict: true,
+    deprecationErrors: true,
+  },
 });
 
 async function run() {
@@ -79,117 +83,120 @@ async function run() {
       }
     });
 
-    
     // GET all books added by a specific librarian
-app.get("/books/librarian/:email", async (req, res) => {
-  try {
-    const email = req.params.email;
-    const books = await booksCollection.find({ addedBy: email }).toArray();
-    res.send(books);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send({ error: "Failed to fetch librarian books" });
-  }
-});
-
+    app.get("/books/librarian/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const books = await booksCollection.find({ addedBy: email }).toArray();
+        res.send(books);
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ error: "Failed to fetch librarian books" });
+      }
+    });
 
     // Update order status
-   app.patch("/books/:id", async (req, res) => {
-  try {
-    const { status, email } = req.body;
-    const id = req.params.id;
+    app.patch("/books/:id", async (req, res) => {
+      try {
+        const { status, email } = req.body;
+        const id = req.params.id;
 
-    
-    const book = await booksCollection.findOne({ _id: new ObjectId(id), addedBy: email });
-    if (!book) return res.status(403).send({ error: "Not allowed to update this book" });
+        const book = await booksCollection.findOne({
+          _id: new ObjectId(id),
+          addedBy: email,
+        });
+        if (!book)
+          return res
+            .status(403)
+            .send({ error: "Not allowed to update this book" });
 
-    const result = await booksCollection.updateOne(
-      { _id: new ObjectId(id) },
-      { $set: { status } }
-    );
+        const result = await booksCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { status } }
+        );
 
-    res.send(result);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send({ error: "Failed to update book status" });
-  }
-});
-app.delete("/books/:id", async (req, res) => {
-  try {
-    const id = req.params.id;
-    const { email } = req.query;
+        res.send(result);
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ error: "Failed to update book status" });
+      }
+    });
+    app.delete("/books/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { email } = req.query;
 
-    
-    const book = await booksCollection.findOne({ _id: new ObjectId(id), addedBy: email });
-    if (!book) return res.status(403).send({ error: "Not allowed to delete this book" });
+        const book = await booksCollection.findOne({
+          _id: new ObjectId(id),
+          addedBy: email,
+        });
+        if (!book)
+          return res
+            .status(403)
+            .send({ error: "Not allowed to delete this book" });
 
-    await booksCollection.deleteOne({ _id: new ObjectId(id) });
-    await ordersCollection.deleteMany({ bookId: id });
+        await booksCollection.deleteOne({ _id: new ObjectId(id) });
+        await ordersCollection.deleteMany({ bookId: id });
 
-    res.send({ message: "Book and related orders deleted" });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send({ error: "Failed to delete book" });
+        res.send({ message: "Book and related orders deleted" });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ error: "Failed to delete book" });
+      }
+    });
 
+    // ================= LIBRARIAN ORDERS =================
+    app.get("/orders/librarian/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
 
-  }
-});
+        const books = await booksCollection.find({ addedBy: email }).toArray();
+        const bookIds = books.map((b) => b._id.toString());
 
+        const orders = await ordersCollection
+          .find({
+            bookId: { $in: bookIds },
+          })
+          .toArray();
 
-// ================= LIBRARIAN ORDERS =================
-app.get("/orders/librarian/:email", async (req, res) => {
-  try {
-    const email = req.params.email;
+        res.send(orders);
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ error: "Failed to fetch librarian orders" });
+      }
+    });
 
-    
-    const books = await booksCollection.find({ addedBy: email }).toArray();
-    const bookIds = books.map(b => b._id.toString());
+    // ================= UPDATE ORDER STATUS =================
+    app.patch("/orders/status/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { status } = req.body;
 
-  
-    const orders = await ordersCollection.find({
-      bookId: { $in: bookIds }
-    }).toArray();
+        const order = await ordersCollection.findOne({ _id: new ObjectId(id) });
+        if (!order) return res.status(404).send({ error: "Order not found" });
 
-    res.send(orders);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send({ error: "Failed to fetch librarian orders" });
-  }
-});
+        const allowed = {
+          pending: ["shipped", "cancelled"],
+          shipped: ["delivered"],
+          delivered: [],
+          cancelled: [],
+        };
 
-// ================= UPDATE ORDER STATUS =================
-app.patch("/orders/status/:id", async (req, res) => {
-  try {
-    const id = req.params.id;
-    const { status } = req.body;
+        if (!allowed[order.status].includes(status)) {
+          return res.status(400).send({ error: "Invalid status transition" });
+        }
 
-    const order = await ordersCollection.findOne({ _id: new ObjectId(id) });
-    if (!order) return res.status(404).send({ error: "Order not found" });
+        const result = await ordersCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { status } }
+        );
 
-    const allowed = {
-      pending: ["shipped", "cancelled"],
-      shipped: ["delivered"],
-      delivered: [],
-      cancelled: []
-    };
-
-    if (!allowed[order.status].includes(status)) {
-      return res.status(400).send({ error: "Invalid status transition" });
-    }
-
-    const result = await ordersCollection.updateOne(
-      { _id: new ObjectId(id) },
-      { $set: { status } }
-    );
-
-    res.send(result);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send({ error: "Failed to update order status" });
-  }
-});
-
-
+        res.send(result);
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ error: "Failed to update order status" });
+      }
+    });
 
     // ================= BOOK ROUTES =================
     app.get("/books", async (req, res) => {
@@ -205,7 +212,11 @@ app.patch("/orders/status/:id", async (req, res) => {
 
     app.get("/books/latest", async (req, res) => {
       try {
-        const books = await booksCollection.find().sort({ createdAt: -1 }).limit(6).toArray();
+        const books = await booksCollection
+          .find()
+          .sort({ createdAt: -1 })
+          .limit(6)
+          .toArray();
         res.send(books);
       } catch (err) {
         res.status(500).send({ message: err.message });
@@ -263,7 +274,8 @@ app.patch("/orders/status/:id", async (req, res) => {
     app.post("/orders", async (req, res) => {
       try {
         const order = req.body;
-        if (!order.buyerEmail) return res.status(400).send({ message: "buyerEmail is required" });
+        if (!order.buyerEmail)
+          return res.status(400).send({ message: "buyerEmail is required" });
 
         order.status = "pending";
         order.paymentStatus = "unpaid";
@@ -291,7 +303,9 @@ app.patch("/orders/status/:id", async (req, res) => {
     app.get("/orders/user/:email", async (req, res) => {
       try {
         const email = req.params.email;
-        const orders = await ordersCollection.find({ buyerEmail: email }).toArray();
+        const orders = await ordersCollection
+          .find({ buyerEmail: email })
+          .toArray();
         res.send(orders);
       } catch (err) {
         res.status(500).send({ error: "Failed to fetch user orders" });
@@ -301,7 +315,9 @@ app.patch("/orders/status/:id", async (req, res) => {
     app.delete("/orders/:id", async (req, res) => {
       try {
         const id = req.params.id;
-        const result = await ordersCollection.deleteOne({ _id: new ObjectId(id) });
+        const result = await ordersCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
         res.send(result);
       } catch (err) {
         res.status(500).send({ error: "Failed to delete order" });
@@ -309,20 +325,19 @@ app.patch("/orders/status/:id", async (req, res) => {
     });
 
     // ================= PAYMENTS ROUTE =================
-app.get("/payments/:email", async (req, res) => {
-  try {
-    const email = req.params.email.toLowerCase(); 
-    const payments = await ordersCollection
-      .find({ buyerEmail: email }) 
-      .sort({ orderDate: -1 })
-      .toArray();
-    res.send(payments);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send({ error: "Failed to fetch payments" });
-  }
-});
-
+    app.get("/payments/:email", async (req, res) => {
+      try {
+        const email = req.params.email.toLowerCase();
+        const payments = await ordersCollection
+          .find({ buyerEmail: email })
+          .sort({ orderDate: -1 })
+          .toArray();
+        res.send(payments);
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ error: "Failed to fetch payments" });
+      }
+    });
 
     // ================= WISHLIST ROUTES =================
     app.post("/wishlist", async (req, res) => {
@@ -337,13 +352,17 @@ app.get("/payments/:email", async (req, res) => {
 
     app.get("/wishlist", async (req, res) => {
       const email = req.query.email;
-      const result = await wishlistCollection.find({ userEmail: email }).toArray();
+      const result = await wishlistCollection
+        .find({ userEmail: email })
+        .toArray();
       res.send(result);
     });
 
     app.delete("/wishlist/:id", async (req, res) => {
       const id = req.params.id;
-      const result = await wishlistCollection.deleteOne({ _id: new ObjectId(id) });
+      const result = await wishlistCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
       res.send(result);
     });
 
@@ -352,9 +371,14 @@ app.get("/payments/:email", async (req, res) => {
       try {
         const roleData = req.body;
         const result = await roleCollection.insertOne(roleData);
-        const existingUser = await usersCollection.findOne({ email: roleData.email });
+        const existingUser = await usersCollection.findOne({
+          email: roleData.email,
+        });
         if (!existingUser) {
-          await usersCollection.insertOne({ email: roleData.email, role: roleData.role });
+          await usersCollection.insertOne({
+            email: roleData.email,
+            role: roleData.role,
+          });
         }
         res.send(result);
       } catch (err) {
@@ -426,59 +450,60 @@ app.get("/payments/:email", async (req, res) => {
     });
 
     // ================= ADD TEST PAYMENT / MARK PAYMENT AS PAID =================
-app.post("/test-payment", async (req, res) => {
-  try {
-    const { orderId, transactionId } = req.body;
-    if (!orderId || !transactionId) {
-      return res.status(400).send({ message: "orderId and transactionId required" });
-    }
+    app.post("/test-payment", async (req, res) => {
+      try {
+        const { orderId, transactionId } = req.body;
+        if (!orderId || !transactionId) {
+          return res
+            .status(400)
+            .send({ message: "orderId and transactionId required" });
+        }
 
-    const result = await ordersCollection.updateOne(
-      { _id: new ObjectId(orderId) },
-      {
-        $set: {
-          paymentStatus: "paid",
-          transactionId,
-          paidAt: new Date(),
-        },
+        const result = await ordersCollection.updateOne(
+          { _id: new ObjectId(orderId) },
+          {
+            $set: {
+              paymentStatus: "paid",
+              transactionId,
+              paidAt: new Date(),
+            },
+          }
+        );
+
+        res.send({ message: "Payment updated successfully", result });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ error: "Failed to update test payment" });
       }
-    );
+    });
 
-    res.send({ message: "Payment updated successfully", result });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send({ error: "Failed to update test payment" });
-  }
-});
+    // ================= INSERT TEST ORDER =================
+    app.post("/test-order", async (req, res) => {
+      try {
+        const { buyerEmail, bookId, bookTitle, price } = req.body;
+        if (!buyerEmail || !bookId || !bookTitle || !price) {
+          return res.status(400).send({ message: "All fields are required" });
+        }
 
-// ================= INSERT TEST ORDER =================
-app.post("/test-order", async (req, res) => {
-  try {
-    const { buyerEmail, bookId, bookTitle, price } = req.body;
-    if (!buyerEmail || !bookId || !bookTitle || !price) {
-      return res.status(400).send({ message: "All fields are required" });
-    }
+        const newOrder = {
+          buyerEmail,
+          bookId: bookId.toString(),
+          bookTitle,
+          price,
+          status: "pending",
+          paymentStatus: "paid", // directly mark paid for testing
+          transactionId: `txn_${Date.now()}`,
+          paidAt: new Date(),
+          orderDate: new Date(),
+        };
 
-    const newOrder = {
-      buyerEmail,
-      bookId: bookId.toString(),
-      bookTitle,
-      price,
-      status: "pending",
-      paymentStatus: "paid", // directly mark paid for testing
-      transactionId: `txn_${Date.now()}`,
-      paidAt: new Date(),
-      orderDate: new Date(),
-    };
-
-    const result = await ordersCollection.insertOne(newOrder);
-    res.send({ message: "Test order created", order: newOrder });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send({ error: "Failed to create test order" });
-  }
-});
-
+        const result = await ordersCollection.insertOne(newOrder);
+        res.send({ message: "Test order created", order: newOrder });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ error: "Failed to create test order" });
+      }
+    });
 
     console.log("Routes are ready!");
   } catch (err) {
@@ -486,7 +511,7 @@ app.post("/test-order", async (req, res) => {
   }
 }
 
-run().catch(console.dir);
+run().catch((err) => console.log(err));
 
 // Root endpoint
 app.get("/", (req, res) => {
@@ -494,3 +519,5 @@ app.get("/", (req, res) => {
 });
 
 app.listen(port, () => console.log(`Server running on port ${port}`));
+module.exports = app;
+
