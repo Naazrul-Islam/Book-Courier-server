@@ -141,11 +141,11 @@ app.get("/orders/librarian/:email", async (req, res) => {
   try {
     const email = req.params.email;
 
-    // librarian-এর added books fetch
+    
     const books = await booksCollection.find({ addedBy: email }).toArray();
-    const bookIds = books.map(b => b._id.toString()); // ObjectId → string
+    const bookIds = books.map(b => b._id.toString());
 
-    // এই books এর orders fetch করা
+  
     const orders = await ordersCollection.find({
       bookId: { $in: bookIds }
     }).toArray();
@@ -308,18 +308,21 @@ app.patch("/orders/status/:id", async (req, res) => {
       }
     });
 
-    app.get("/payments/:email", async (req, res) => {
-      try {
-        const email = req.params.email;
-        const payments = await ordersCollection
-          .find({ buyerEmail: email, paymentStatus: "paid" })
-          .sort({ paidAt: -1 })
-          .toArray();
-        res.send(payments);
-      } catch (err) {
-        res.status(500).send({ error: "Failed to fetch payments" });
-      }
-    });
+    // ================= PAYMENTS ROUTE =================
+app.get("/payments/:email", async (req, res) => {
+  try {
+    const email = req.params.email.toLowerCase(); 
+    const payments = await ordersCollection
+      .find({ buyerEmail: email }) 
+      .sort({ orderDate: -1 })
+      .toArray();
+    res.send(payments);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ error: "Failed to fetch payments" });
+  }
+});
+
 
     // ================= WISHLIST ROUTES =================
     app.post("/wishlist", async (req, res) => {
@@ -421,6 +424,61 @@ app.patch("/orders/status/:id", async (req, res) => {
 
       res.send({ message: "Admin successfully created", result });
     });
+
+    // ================= ADD TEST PAYMENT / MARK PAYMENT AS PAID =================
+app.post("/test-payment", async (req, res) => {
+  try {
+    const { orderId, transactionId } = req.body;
+    if (!orderId || !transactionId) {
+      return res.status(400).send({ message: "orderId and transactionId required" });
+    }
+
+    const result = await ordersCollection.updateOne(
+      { _id: new ObjectId(orderId) },
+      {
+        $set: {
+          paymentStatus: "paid",
+          transactionId,
+          paidAt: new Date(),
+        },
+      }
+    );
+
+    res.send({ message: "Payment updated successfully", result });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ error: "Failed to update test payment" });
+  }
+});
+
+// ================= INSERT TEST ORDER =================
+app.post("/test-order", async (req, res) => {
+  try {
+    const { buyerEmail, bookId, bookTitle, price } = req.body;
+    if (!buyerEmail || !bookId || !bookTitle || !price) {
+      return res.status(400).send({ message: "All fields are required" });
+    }
+
+    const newOrder = {
+      buyerEmail,
+      bookId: bookId.toString(),
+      bookTitle,
+      price,
+      status: "pending",
+      paymentStatus: "paid", // directly mark paid for testing
+      transactionId: `txn_${Date.now()}`,
+      paidAt: new Date(),
+      orderDate: new Date(),
+    };
+
+    const result = await ordersCollection.insertOne(newOrder);
+    res.send({ message: "Test order created", order: newOrder });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ error: "Failed to create test order" });
+  }
+});
+
 
     console.log("Routes are ready!");
   } catch (err) {
