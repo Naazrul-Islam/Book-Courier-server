@@ -1,4 +1,3 @@
-// server.js
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
@@ -26,6 +25,7 @@ async function run() {
     const ordersCollection = db.collection("orders");
     const roleCollection = db.collection("userRoles");
     const usersCollection = db.collection("users");
+    const wishlistCollection = db.collection("wishlists");
 
     console.log("Connected to MongoDB!");
 
@@ -34,7 +34,7 @@ async function run() {
       try {
         const { price } = req.body;
         if (!price) return res.status(400).send({ error: "Price is required" });
-        const amount = Math.round(price * 100); // cents
+        const amount = Math.round(price * 100);
         const paymentIntent = await stripe.paymentIntents.create({
           amount,
           currency: "usd",
@@ -48,13 +48,20 @@ async function run() {
     });
 
     // ================= ORDERS =================
+    // Update payment
     app.patch("/orders/:id", async (req, res) => {
       try {
         const id = req.params.id;
         const { paymentStatus, transactionId } = req.body;
         const result = await ordersCollection.updateOne(
           { _id: new ObjectId(id) },
-          { $set: { paymentStatus: paymentStatus || "paid", transactionId: transactionId || null, paidAt: new Date() } }
+          {
+            $set: {
+              paymentStatus: paymentStatus || "paid",
+              transactionId: transactionId || null,
+              paidAt: new Date(),
+            },
+          }
         );
         res.send(result);
       } catch (err) {
@@ -71,6 +78,62 @@ async function run() {
         res.status(500).send({ error: "Failed to fetch order" });
       }
     });
+
+    
+    // GET all books added by a specific librarian
+app.get("/books/librarian/:email", async (req, res) => {
+  try {
+    const email = req.params.email;
+    const books = await booksCollection.find({ addedBy: email }).toArray();
+    res.send(books);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ error: "Failed to fetch librarian books" });
+  }
+});
+
+
+    // Update order status
+   app.patch("/books/:id", async (req, res) => {
+  try {
+    const { status, email } = req.body;
+    const id = req.params.id;
+
+    
+    const book = await booksCollection.findOne({ _id: new ObjectId(id), addedBy: email });
+    if (!book) return res.status(403).send({ error: "Not allowed to update this book" });
+
+    const result = await booksCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { status } }
+    );
+
+    res.send(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ error: "Failed to update book status" });
+  }
+});
+app.delete("/books/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { email } = req.query;
+
+    
+    const book = await booksCollection.findOne({ _id: new ObjectId(id), addedBy: email });
+    if (!book) return res.status(403).send({ error: "Not allowed to delete this book" });
+
+    await booksCollection.deleteOne({ _id: new ObjectId(id) });
+    await ordersCollection.deleteMany({ bookId: id });
+
+    res.send({ message: "Book and related orders deleted" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ error: "Failed to delete book" });
+  }
+});
+
+
 
     // ================= BOOK ROUTES =================
     app.get("/books", async (req, res) => {
@@ -144,9 +207,15 @@ async function run() {
     app.post("/orders", async (req, res) => {
       try {
         const order = req.body;
+        if (!order.buyerEmail) return res.status(400).send({ message: "buyerEmail is required" });
+
         order.status = "pending";
         order.paymentStatus = "unpaid";
         order.orderDate = new Date();
+
+        // ensure bookId is string
+        order.bookId = order.bookId.toString();
+
         const result = await ordersCollection.insertOne(order);
         res.send(result);
       } catch (err) {
@@ -173,20 +242,6 @@ async function run() {
       }
     });
 
-    app.patch("/orders/status/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-        const { status } = req.body;
-        const result = await ordersCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: { status } }
-        );
-        res.send(result);
-      } catch (err) {
-        res.status(500).send({ error: "Failed to update order status" });
-      }
-    });
-
     app.delete("/orders/:id", async (req, res) => {
       try {
         const id = req.params.id;
@@ -202,6 +257,7 @@ async function run() {
         const email = req.params.email;
         const payments = await ordersCollection
           .find({ buyerEmail: email, paymentStatus: "paid" })
+          .sort({ paidAt: -1 })
           .toArray();
         res.send(payments);
       } catch (err) {
@@ -209,44 +265,28 @@ async function run() {
       }
     });
 
+    // ================= WISHLIST ROUTES =================
+    app.post("/wishlist", async (req, res) => {
+      const wishlist = req.body;
+      const query = { bookId: wishlist.bookId, userEmail: wishlist.userEmail };
+      const exists = await wishlistCollection.findOne(query);
+      if (exists) return res.status(400).send({ message: "Already added" });
 
-    // Add wishlist
-app.post("/wishlist", async (req, res) => {
-  const wishlist = req.body;
-  const query = {
-    bookId: wishlist.bookId,
-    userEmail: wishlist.userEmail,
-  };
+      const result = await wishlistCollection.insertOne(wishlist);
+      res.send(result);
+    });
 
-  const exists = await wishlistCollection.findOne(query);
-  if (exists) {
-    return res.status(400).send({ message: "Already added" });
-  }
+    app.get("/wishlist", async (req, res) => {
+      const email = req.query.email;
+      const result = await wishlistCollection.find({ userEmail: email }).toArray();
+      res.send(result);
+    });
 
-  const result = await wishlistCollection.insertOne(wishlist);
-  res.send(result);
-});
-
-
-// Get wishlist by user
-app.get("/wishlist", async (req, res) => {
-  const email = req.query.email;
-  const result = await wishlistCollection
-    .find({ userEmail: email })
-    .toArray();
-  res.send(result);
-});
-
-
-// Delete wishlist
-app.delete("/wishlist/:id", async (req, res) => {
-  const id = req.params.id;
-  const result = await wishlistCollection.deleteOne({
-    _id: new ObjectId(id),
-  });
-  res.send(result);
-});
-
+    app.delete("/wishlist/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await wishlistCollection.deleteOne({ _id: new ObjectId(id) });
+      res.send(result);
+    });
 
     // ================= USER ROLE ROUTES =================
     app.post("/user-role", async (req, res) => {
@@ -307,10 +347,8 @@ app.delete("/wishlist/:id", async (req, res) => {
       }
     });
 
-    console.log("Routes are ready!");
-
     // ================= ADMIN EMAIL SET ROUTE =================
-    const ADMIN_EMAIL = "youremail@gmail.com"; // <-- তোমার ওয়েবের admin email
+    const ADMIN_EMAIL = "youremail@gmail.com";
 
     app.post("/set-admin", async (req, res) => {
       const { email } = req.body;
@@ -322,12 +360,13 @@ app.delete("/wishlist/:id", async (req, res) => {
       const result = await usersCollection.updateOne(
         { email },
         { $set: { role: "admin" } },
-        { upsert: true } // যদি user না থাকে, create করে
+        { upsert: true }
       );
 
       res.send({ message: "Admin successfully created", result });
     });
 
+    console.log("Routes are ready!");
   } catch (err) {
     console.error(err);
   }
