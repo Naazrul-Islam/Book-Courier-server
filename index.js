@@ -30,6 +30,7 @@ async function run() {
     const roleCollection = db.collection("userRoles");
     const usersCollection = db.collection("users");
     const wishlistCollection = db.collection("wishlists");
+    const reviewsCollection = db.collection("reviews");
 
     console.log("Connected to MongoDB!");
 
@@ -504,6 +505,49 @@ async function run() {
         res.status(500).send({ error: "Failed to create test order" });
       }
     });
+    // ================= CHECK IF USER CAN REVIEW A BOOK =================
+
+    app.get("/can-review", async (req, res) => {
+      const { bookId, email } = req.query;
+
+      const order = await ordersCollection.findOne({
+        bookId,
+        buyerEmail: email,
+        status: { $ne: "cancelled" },
+      });
+
+      res.send({ canReview: !!order });
+    });
+
+    app.post("/reviews", async (req, res) => {
+      const review = req.body;
+
+      // prevent duplicate review
+      const exists = await reviewsCollection.findOne({
+        bookId: review.bookId,
+        userEmail: review.userEmail,
+      });
+
+      if (exists) {
+        return res.status(400).send({ message: "Already reviewed" });
+      }
+
+      review.createdAt = new Date();
+
+      const result = await reviewsCollection.insertOne(review);
+      res.send(result);
+    });
+
+    app.get("/reviews/:bookId", async (req, res) => {
+      const bookId = req.params.bookId;
+
+      const reviews = await reviewsCollection
+        .find({ bookId })
+        .sort({ createdAt: -1 })
+        .toArray();
+
+      res.send(reviews);
+    });
 
     console.log("Routes are ready!");
   } catch (err) {
@@ -520,4 +564,3 @@ app.get("/", (req, res) => {
 
 app.listen(port, () => console.log(`Server running on port ${port}`));
 module.exports = app;
-
