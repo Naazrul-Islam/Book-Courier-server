@@ -130,6 +130,62 @@ app.delete("/books/:id", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).send({ error: "Failed to delete book" });
+
+
+  }
+});
+
+
+// ================= LIBRARIAN ORDERS =================
+app.get("/orders/librarian/:email", async (req, res) => {
+  try {
+    const email = req.params.email;
+
+    // librarian-এর added books fetch
+    const books = await booksCollection.find({ addedBy: email }).toArray();
+    const bookIds = books.map(b => b._id.toString()); // ObjectId → string
+
+    // এই books এর orders fetch করা
+    const orders = await ordersCollection.find({
+      bookId: { $in: bookIds }
+    }).toArray();
+
+    res.send(orders);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ error: "Failed to fetch librarian orders" });
+  }
+});
+
+// ================= UPDATE ORDER STATUS =================
+app.patch("/orders/status/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { status } = req.body;
+
+    const order = await ordersCollection.findOne({ _id: new ObjectId(id) });
+    if (!order) return res.status(404).send({ error: "Order not found" });
+
+    const allowed = {
+      pending: ["shipped", "cancelled"],
+      shipped: ["delivered"],
+      delivered: [],
+      cancelled: []
+    };
+
+    if (!allowed[order.status].includes(status)) {
+      return res.status(400).send({ error: "Invalid status transition" });
+    }
+
+    const result = await ordersCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { status } }
+    );
+
+    res.send(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ error: "Failed to update order status" });
   }
 });
 
