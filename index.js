@@ -10,8 +10,9 @@ const port = process.env.PORT || 4040;
 app.use(cors());
 app.use(express.json());
 
-// MongoDB connection
+// MongoDB
 const uri = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@cluster0.c0vwcej.mongodb.net/?appName=Cluster0`;
+
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -22,7 +23,6 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
-    // await client.connect();
     const db = client.db("bookCourier");
 
     const booksCollection = db.collection("books");
@@ -32,579 +32,196 @@ async function run() {
     const wishlistCollection = db.collection("wishlists");
     const reviewsCollection = db.collection("reviews");
 
-    console.log("Connected to MongoDB!");
+    console.log("MongoDB Connected");
 
-    // ================= STRIPE PAYMENT INTEGRATION =================
+    // ================= STRIPE =================
     app.post("/create-payment-intent", async (req, res) => {
-      try {
-        const { price } = req.body;
-        if (!price) return res.status(400).send({ error: "Price is required" });
-        const amount = Math.round(price * 100);
-        const paymentIntent = await stripe.paymentIntents.create({
-          amount,
-          currency: "usd",
-          payment_method_types: ["card"],
-        });
-        res.send({ clientSecret: paymentIntent.client_secret });
-      } catch (error) {
-        console.error("Stripe Error:", error);
-        res.status(500).send({ error: error.message });
-      }
-    });
-
-    // ================= ORDERS =================
-    // Update payment
-    app.patch("/orders/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-        const { paymentStatus, transactionId } = req.body;
-        const result = await ordersCollection.updateOne(
-          { _id: new ObjectId(id) },
-          {
-            $set: {
-              paymentStatus: paymentStatus || "paid",
-              transactionId: transactionId || null,
-              paidAt: new Date(),
-            },
-          }
-        );
-        res.send(result);
-      } catch (err) {
-        res.status(500).send({ error: "Failed to update payment" });
-      }
-    });
-
-    app.get("/orders/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-        const order = await ordersCollection.findOne({ _id: new ObjectId(id) });
-        res.send(order);
-      } catch (err) {
-        res.status(500).send({ error: "Failed to fetch order" });
-      }
-    });
-
-    // GET all books added by a specific librarian
-    app.get("/books/librarian/:email", async (req, res) => {
-      try {
-        const email = req.params.email;
-        const books = await booksCollection.find({ addedBy: email }).toArray();
-        res.send(books);
-      } catch (err) {
-        console.error(err);
-        res.status(500).send({ error: "Failed to fetch librarian books" });
-      }
-    });
-
-    // Update order status
-    app.patch("/books/:id", async (req, res) => {
-      try {
-        const { status, email } = req.body;
-        const id = req.params.id;
-
-        const book = await booksCollection.findOne({
-          _id: new ObjectId(id),
-          addedBy: email,
-        });
-        if (!book)
-          return res
-            .status(403)
-            .send({ error: "Not allowed to update this book" });
-
-        const result = await booksCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: { status } }
-        );
-
-        res.send(result);
-      } catch (err) {
-        console.error(err);
-        res.status(500).send({ error: "Failed to update book status" });
-      }
-    });
-    app.delete("/books/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-        const { email } = req.query;
-
-        const book = await booksCollection.findOne({
-          _id: new ObjectId(id),
-          addedBy: email,
-        });
-        if (!book)
-          return res
-            .status(403)
-            .send({ error: "Not allowed to delete this book" });
-
-        await booksCollection.deleteOne({ _id: new ObjectId(id) });
-        await ordersCollection.deleteMany({ bookId: id });
-
-        res.send({ message: "Book and related orders deleted" });
-      } catch (err) {
-        console.error(err);
-        res.status(500).send({ error: "Failed to delete book" });
-      }
-    });
-
-    // ================= LIBRARIAN ORDERS =================
-    app.get("/orders/librarian/:email", async (req, res) => {
-      try {
-        const email = req.params.email;
-
-        const books = await booksCollection.find({ addedBy: email }).toArray();
-        const bookIds = books.map((b) => b._id.toString());
-
-        const orders = await ordersCollection
-          .find({
-            bookId: { $in: bookIds },
-          })
-          .toArray();
-
-        res.send(orders);
-      } catch (err) {
-        console.error(err);
-        res.status(500).send({ error: "Failed to fetch librarian orders" });
-      }
-    });
-
-    // ================= UPDATE ORDER STATUS =================
-    app.patch("/orders/status/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-        const { status } = req.body;
-
-        const order = await ordersCollection.findOne({ _id: new ObjectId(id) });
-        if (!order) return res.status(404).send({ error: "Order not found" });
-
-        const allowed = {
-          pending: ["shipped", "cancelled"],
-          shipped: ["delivered"],
-          delivered: [],
-          cancelled: [],
-        };
-
-        if (!allowed[order.status].includes(status)) {
-          return res.status(400).send({ error: "Invalid status transition" });
-        }
-
-        const result = await ordersCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: { status } }
-        );
-
-        res.send(result);
-      } catch (err) {
-        console.error(err);
-        res.status(500).send({ error: "Failed to update order status" });
-      }
-    });
-
-    // ================= BOOK ROUTES =================
-    app.get("/books", async (req, res) => {
-      try {
-        const status = req.query.status;
-        const query = status ? { status } : {};
-        const result = await booksCollection.find(query).toArray();
-        res.send(result);
-      } catch (err) {
-        res.status(500).send({ error: "Failed to fetch books" });
-      }
-    });
-
-    app.get("/books/latest", async (req, res) => {
-      try {
-        const books = await booksCollection
-          .find()
-          .sort({ createdAt: -1 })
-          .limit(6)
-          .toArray();
-        res.send(books);
-      } catch (err) {
-        res.status(500).send({ message: err.message });
-      }
-    });
-
-    app.get("/books/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-        const result = await booksCollection.findOne({ _id: new ObjectId(id) });
-        res.send(result);
-      } catch (err) {
-        res.status(500).send({ error: "Failed to fetch book" });
-      }
-    });
-
-    app.post("/books", async (req, res) => {
-      try {
-        const newBook = req.body;
-        newBook.status = "unpublished";
-        newBook.createdAt = new Date();
-        const result = await booksCollection.insertOne(newBook);
-        res.send(result);
-      } catch (err) {
-        res.status(500).send({ error: "Failed to add book" });
-      }
-    });
-
-    app.patch("/books/:id/publish", async (req, res) => {
-      try {
-        const id = req.params.id;
-        const { publish } = req.body;
-        const result = await booksCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: { status: publish } }
-        );
-        res.send(result);
-      } catch (err) {
-        res.status(500).send({ error: "Failed to update status" });
-      }
-    });
-
-    app.delete("/books/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-        await booksCollection.deleteOne({ _id: new ObjectId(id) });
-        await ordersCollection.deleteMany({ bookId: id });
-        res.send({ message: "Book and related orders deleted" });
-      } catch (err) {
-        res.status(500).send({ error: "Failed to delete book" });
-      }
-    });
-
-    // ================= ORDERS ROUTES =================
-    app.post("/orders", async (req, res) => {
-      try {
-        const order = req.body;
-        if (!order.buyerEmail)
-          return res.status(400).send({ message: "buyerEmail is required" });
-
-        order.status = "pending";
-        order.paymentStatus = "unpaid";
-        order.orderDate = new Date();
-
-        // ensure bookId is string
-        order.bookId = order.bookId.toString();
-
-        const result = await ordersCollection.insertOne(order);
-        res.send(result);
-      } catch (err) {
-        res.status(500).send({ error: "Failed to place order" });
-      }
-    });
-
-    app.get("/orders", async (req, res) => {
-      try {
-        const orders = await ordersCollection.find().toArray();
-        res.send(orders);
-      } catch (err) {
-        res.status(500).send({ error: "Failed to fetch orders" });
-      }
-    });
-
-    app.get("/orders/user/:email", async (req, res) => {
-      try {
-        const email = req.params.email;
-        const orders = await ordersCollection
-          .find({ buyerEmail: email })
-          .toArray();
-        res.send(orders);
-      } catch (err) {
-        res.status(500).send({ error: "Failed to fetch user orders" });
-      }
-    });
-
-    app.delete("/orders/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-        const result = await ordersCollection.deleteOne({
-          _id: new ObjectId(id),
-        });
-        res.send(result);
-      } catch (err) {
-        res.status(500).send({ error: "Failed to delete order" });
-      }
-    });
-
-    // ================= PAYMENTS ROUTE =================
-    app.get("/payments/:email", async (req, res) => {
-      try {
-        const email = req.params.email.toLowerCase();
-        const payments = await ordersCollection
-          .find({ buyerEmail: email })
-          .sort({ orderDate: -1 })
-          .toArray();
-        res.send(payments);
-      } catch (err) {
-        console.error(err);
-        res.status(500).send({ error: "Failed to fetch payments" });
-      }
-    });
-
-    // ================= WISHLIST ROUTES =================
-    app.post("/wishlist", async (req, res) => {
-      const wishlist = req.body;
-      const query = { bookId: wishlist.bookId, userEmail: wishlist.userEmail };
-      const exists = await wishlistCollection.findOne(query);
-      if (exists) return res.status(400).send({ message: "Already added" });
-
-      const result = await wishlistCollection.insertOne(wishlist);
-      res.send(result);
-    });
-
-    app.get("/wishlist", async (req, res) => {
-      const email = req.query.email;
-      const result = await wishlistCollection
-        .find({ userEmail: email })
-        .toArray();
-      res.send(result);
-    });
-
-    app.delete("/wishlist/:id", async (req, res) => {
-      const id = req.params.id;
-      const result = await wishlistCollection.deleteOne({
-        _id: new ObjectId(id),
+      const { price } = req.body;
+      const amount = Math.round(price * 100);
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount,
+        currency: "usd",
+        payment_method_types: ["card"],
       });
-      res.send(result);
+      res.send({ clientSecret: paymentIntent.client_secret });
     });
 
-    // ================= USER ROLE ROUTES =================
+    // ================= USER ROLE (FIXED) =================
     app.post("/user-role", async (req, res) => {
       try {
-        const roleData = req.body;
-        const result = await roleCollection.insertOne(roleData);
-        const existingUser = await usersCollection.findOne({
-          email: roleData.email,
-        });
-        if (!existingUser) {
-          await usersCollection.insertOne({
-            email: roleData.email,
-            role: roleData.role,
-          });
-        }
-        res.send(result);
-      } catch (err) {
-        res.status(500).send({ error: "Failed to add user role" });
-      }
-    });
+        const { email, role } = req.body;
 
-    app.get("/user-roles", async (req, res) => {
-      try {
-        const result = await roleCollection.find().toArray();
-        res.send(result);
+        const finalRole =
+          email === process.env.ADMIN_EMAIL
+            ? "admin"
+            : role?.toLowerCase() === "librarian"
+            ? "librarian"
+            : "user";
+
+        await roleCollection.updateOne(
+          { email },
+          { $set: { email, role: finalRole } },
+          { upsert: true }
+        );
+
+        await usersCollection.updateOne(
+          { email },
+          { $set: { email, role: finalRole } },
+          { upsert: true }
+        );
+
+        res.send({ email, role: finalRole });
       } catch (err) {
-        res.status(500).send({ error: "Failed to get user roles" });
+        res.status(500).send({ error: "Failed to set role" });
       }
     });
 
     app.get("/user-role/:email", async (req, res) => {
-      try {
-        const email = req.params.email;
-        const result = await roleCollection.findOne({ email });
-        res.send(result || {});
-      } catch (err) {
-        res.status(500).send({ error: "Failed to get user role" });
-      }
+      const email = req.params.email;
+      const result = await roleCollection.findOne({ email });
+      res.send(result || { role: "user" });
     });
 
-    // ================= USERS ROUTES =================
+    // ================= USERS =================
     app.get("/users", async (req, res) => {
-      try {
-        const users = await usersCollection.find().toArray();
-        res.send(users);
-      } catch (err) {
-        res.status(500).send({ error: "Failed to fetch users" });
-      }
+      const users = await usersCollection.find().toArray();
+      res.send(users);
     });
 
     app.put("/users/role/:email", async (req, res) => {
-      try {
-        const email = req.params.email;
-        const { role } = req.body;
-        const result = await usersCollection.updateOne(
-          { email },
-          { $set: { role } },
-          { upsert: true }
-        );
-        res.send(result);
-      } catch (err) {
-        res.status(500).send({ error: "Failed to update role" });
-      }
-    });
-
-    // ================= ADMIN EMAIL SET ROUTE =================
-    const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
-
-    app.post("/set-admin", async (req, res) => {
-      const { email } = req.body;
-
-      if (email !== ADMIN_EMAIL) {
-        return res.status(403).send({ message: "Not allowed" });
-      }
-
+      const email = req.params.email;
+      const { role } = req.body;
       const result = await usersCollection.updateOne(
         { email },
-        { $set: { role: "admin" } },
+        { $set: { role } },
         { upsert: true }
       );
-
-      res.send({ message: "Admin successfully created", result });
+      res.send(result);
     });
 
-    // ================= ADD TEST PAYMENT / MARK PAYMENT AS PAID =================
-    app.post("/test-payment", async (req, res) => {
-      try {
-        const { orderId, transactionId } = req.body;
-        if (!orderId || !transactionId) {
-          return res
-            .status(400)
-            .send({ message: "orderId and transactionId required" });
-        }
+    // ================= BOOKS =================
+    app.get("/books", async (req, res) => {
+      const status = req.query.status;
+      const query = status ? { status } : {};
+      res.send(await booksCollection.find(query).toArray());
+    });
 
-        const result = await ordersCollection.updateOne(
-          { _id: new ObjectId(orderId) },
+    app.get("/books/latest", async (req, res) => {
+      res.send(
+        await booksCollection
+          .find()
+          .sort({ createdAt: -1 })
+          .limit(6)
+          .toArray()
+      );
+    });
+
+    app.get("/books/:id", async (req, res) => {
+      res.send(
+        await booksCollection.findOne({ _id: new ObjectId(req.params.id) })
+      );
+    });
+
+    app.post("/books", async (req, res) => {
+      const book = req.body;
+      book.status = "unpublished";
+      book.createdAt = new Date();
+      res.send(await booksCollection.insertOne(book));
+    });
+
+    app.patch("/books/:id/publish", async (req, res) => {
+      res.send(
+        await booksCollection.updateOne(
+          { _id: new ObjectId(req.params.id) },
+          { $set: { status: req.body.publish } }
+        )
+      );
+    });
+
+    // ================= ORDERS =================
+    app.post("/orders", async (req, res) => {
+      const order = req.body;
+      order.status = "pending";
+      order.paymentStatus = "unpaid";
+      order.orderDate = new Date();
+      order.bookId = order.bookId.toString();
+      res.send(await ordersCollection.insertOne(order));
+    });
+
+    app.get("/orders/user/:email", async (req, res) => {
+      res.send(
+        await ordersCollection
+          .find({ buyerEmail: req.params.email })
+          .toArray()
+      );
+    });
+
+    app.patch("/orders/:id", async (req, res) => {
+      res.send(
+        await ordersCollection.updateOne(
+          { _id: new ObjectId(req.params.id) },
           {
             $set: {
               paymentStatus: "paid",
-              transactionId,
+              transactionId: req.body.transactionId,
               paidAt: new Date(),
             },
           }
-        );
-
-        res.send({ message: "Payment updated successfully", result });
-      } catch (err) {
-        console.error(err);
-        res.status(500).send({ error: "Failed to update test payment" });
-      }
+        )
+      );
     });
 
-    // ================= INSERT TEST ORDER =================
-    app.post("/test-order", async (req, res) => {
-      try {
-        const { buyerEmail, bookId, bookTitle, price } = req.body;
-        if (!buyerEmail || !bookId || !bookTitle || !price) {
-          return res.status(400).send({ message: "All fields are required" });
-        }
-
-        const newOrder = {
-          buyerEmail,
-          bookId: bookId.toString(),
-          bookTitle,
-          price,
-          status: "pending",
-          paymentStatus: "paid", // directly mark paid for testing
-          transactionId: `txn_${Date.now()}`,
-          paidAt: new Date(),
-          orderDate: new Date(),
-        };
-
-        const result = await ordersCollection.insertOne(newOrder);
-        res.send({ message: "Test order created", order: newOrder });
-      } catch (err) {
-        console.error(err);
-        res.status(500).send({ error: "Failed to create test order" });
-      }
+    // ================= WISHLIST =================
+    app.post("/wishlist", async (req, res) => {
+      const exists = await wishlistCollection.findOne(req.body);
+      if (exists) return res.status(400).send({ message: "Already added" });
+      res.send(await wishlistCollection.insertOne(req.body));
     });
-    app.post("/user-role", async (req, res) => {
-  try {
-    const { email, role } = req.body;
 
-    // 🔐 ADMIN CHECK (ONLY ONE EMAIL)
-    const finalRole =
-      email === process.env.ADMIN_EMAIL
-        ? "admin"
-        : role?.toLowerCase() === "librarian"
-        ? "librarian"
-        : "user";
+    app.get("/wishlist", async (req, res) => {
+      res.send(
+        await wishlistCollection
+          .find({ userEmail: req.query.email })
+          .toArray()
+      );
+    });
 
-    // UPSERT ROLE
-    const result = await roleCollection.updateOne(
-      { email },
-      { $set: { email, role: finalRole } },
-      { upsert: true }
-    );
-
-    // UPSERT USER
-    await usersCollection.updateOne(
-      { email },
-      { $set: { email, role: finalRole } },
-      { upsert: true }
-    );
-
-    res.send({ email, role: finalRole });
-  } catch (err) {
-    res.status(500).send({ error: "Failed to set role" });
-  }
-});
-
-
-app.get("/user-role/:email", async (req, res) => {
-  const email = req.params.email;
-  const result = await roleCollection.findOne({ email });
-  res.send(result || { role: "user" });
-});
-
-
-
-
-
-
-    // ================= CHECK IF USER CAN REVIEW A BOOK =================
-
+    // ================= REVIEWS =================
     app.get("/can-review", async (req, res) => {
-      const { bookId, email } = req.query;
-
       const order = await ordersCollection.findOne({
-        bookId,
-        buyerEmail: email,
-        status: { $ne: "cancelled" },
+        bookId: req.query.bookId,
+        buyerEmail: req.query.email,
       });
-
       res.send({ canReview: !!order });
     });
 
     app.post("/reviews", async (req, res) => {
-      const review = req.body;
-
-      // prevent duplicate review
       const exists = await reviewsCollection.findOne({
-        bookId: review.bookId,
-        userEmail: review.userEmail,
+        bookId: req.body.bookId,
+        userEmail: req.body.userEmail,
       });
+      if (exists) return res.status(400).send({ message: "Already reviewed" });
 
-      if (exists) {
-        return res.status(400).send({ message: "Already reviewed" });
-      }
-
-      review.createdAt = new Date();
-
-      const result = await reviewsCollection.insertOne(review);
-      res.send(result);
+      req.body.createdAt = new Date();
+      res.send(await reviewsCollection.insertOne(req.body));
     });
 
     app.get("/reviews/:bookId", async (req, res) => {
-      const bookId = req.params.bookId;
-
-      const reviews = await reviewsCollection
-        .find({ bookId })
-        .sort({ createdAt: -1 })
-        .toArray();
-
-      res.send(reviews);
+      res.send(
+        await reviewsCollection
+          .find({ bookId: req.params.bookId })
+          .sort({ createdAt: -1 })
+          .toArray()
+      );
     });
 
-    console.log("Routes are ready!");
+    console.log("All routes ready");
   } catch (err) {
     console.error(err);
   }
 }
 
-run().catch((err) => console.log(err));
+run();
 
-// Root endpoint
-app.get("/", (req, res) => {
-  res.send("BookCourier Server Running!");
-});
-
-app.listen(port, () => console.log(`Server running on port ${port}`));
-module.exports = app;
+app.get("/", (req, res) => res.send("BookCourier Server Running"));
+app.listen(port, () => console.log(`Server running on ${port}`));
