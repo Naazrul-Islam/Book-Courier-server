@@ -505,6 +505,50 @@ async function run() {
         res.status(500).send({ error: "Failed to create test order" });
       }
     });
+    app.post("/user-role", async (req, res) => {
+  try {
+    const { email, role } = req.body;
+
+    // 🔐 ADMIN CHECK (ONLY ONE EMAIL)
+    const finalRole =
+      email === process.env.ADMIN_EMAIL
+        ? "admin"
+        : role?.toLowerCase() === "librarian"
+        ? "librarian"
+        : "user";
+
+    // UPSERT ROLE
+    const result = await roleCollection.updateOne(
+      { email },
+      { $set: { email, role: finalRole } },
+      { upsert: true }
+    );
+
+    // UPSERT USER
+    await usersCollection.updateOne(
+      { email },
+      { $set: { email, role: finalRole } },
+      { upsert: true }
+    );
+
+    res.send({ email, role: finalRole });
+  } catch (err) {
+    res.status(500).send({ error: "Failed to set role" });
+  }
+});
+
+
+app.get("/user-role/:email", async (req, res) => {
+  const email = req.params.email;
+  const result = await roleCollection.findOne({ email });
+  res.send(result || { role: "user" });
+});
+
+
+
+
+
+
     // ================= CHECK IF USER CAN REVIEW A BOOK =================
 
     app.get("/can-review", async (req, res) => {
