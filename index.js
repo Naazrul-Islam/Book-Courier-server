@@ -432,7 +432,7 @@ async function run() {
     });
 
     // ================= ADMIN EMAIL SET ROUTE =================
-    const ADMIN_EMAIL = "youremail@gmail.com";
+    const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
 
     app.post("/set-admin", async (req, res) => {
       const { email } = req.body;
